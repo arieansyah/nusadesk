@@ -1,6 +1,6 @@
 {
   "name": "nusadesk",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "NusaDesk — open-source cross-platform remote desktop (macOS & Windows)",
   "main": "src/main.js",
   "scripts": {
