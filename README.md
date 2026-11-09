@@ -74,7 +74,7 @@ or [build it yourself](#building). On first launch, enter your server address
 |---|---|
 | macOS Apple Silicon | `NusaDesk-<version>-arm64.dmg` |
 | macOS Intel | `NusaDesk-<version>.dmg` |
-| Windows | `NusaDesk Setup <version>.exe` (installer) or `NusaDesk <version>.exe` (portable) |
+| Windows | `NusaDesk.Setup.<version>.exe` (installer) or `NusaDesk.<version>.exe` (portable) |
 
 The builds are not code-signed yet. On macOS open the app with *right click → Open*.
 On Windows choose *More info → Run anyway*.

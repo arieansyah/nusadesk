@@ -58,7 +58,7 @@ build sendiri. Saat pertama dibuka, masukkan alamat server Anda (`wss://…` ata
 |---|---|
 | macOS Apple Silicon | `NusaDesk-<versi>-arm64.dmg` |
 | macOS Intel | `NusaDesk-<versi>.dmg` |
-| Windows | `NusaDesk Setup <versi>.exe` (installer) atau `NusaDesk <versi>.exe` (portable) |
+| Windows | `NusaDesk.Setup.<versi>.exe` (installer) atau `NusaDesk.<versi>.exe` (portable) |
 
 Build belum ditandatangani resmi:
 - **macOS:** buka lewat *klik kanan → Open*.
