@@ -1,0 +1,23 @@
+{
+  "name": "nusadesk-server",
+  "version": "1.0.0",
+  "description": "NusaDesk signaling server (pairs devices, relays WebRTC signaling)",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/security.js",
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "Arieansyah",
+  "license": "AGPL-3.0-only",
+  "type": "commonjs",
+  "dependencies": {
+    "ws": "^8.22.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arieansyah/nusadesk.git",
+    "directory": "server"
+  },
+  "homepage": "https://github.com/arieansyah/nusadesk"
+}

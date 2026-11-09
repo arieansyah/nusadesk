@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>NusaDesk — sesi aktif</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    html, body { background: var(--panel); overflow: hidden; user-select: none; }
+    body { border: 1px solid var(--accent); border-radius: 10px; height: 100vh; display: flex; flex-direction: column; }
+    .head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; font-weight: 600; font-size: 13px; -webkit-app-region: drag; }
+    .rec { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .35; } }
+    .row { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--line); font-size: 12px; }
+    .who { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .code { color: var(--ok); }
+    button { font-size: 12px; padding: 4px 10px; }
+  </style>
+</head>
+<body>
+  <div class="head"><span class="rec"></span><span>Komputer ini sedang diakses dari jarak jauh</span></div>
+  <div id="list"></div>
+  <script src="indicator.js"></script>
+</body>
+</html>

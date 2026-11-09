@@ -1,0 +1,79 @@
+name: release
+
+# Push a tag like v1.2.0 → CI → macOS (arm64 + x64 .dmg) and Windows (.exe installer +
+# portable) builds → attached to a *draft* GitHub Release. Review the draft, then
+# publish it. Builds have no built-in signaling server (users enter their own).
+# macOS builds are ad-hoc signed only (no Developer ID / notarization yet).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  draft:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft --generate-notes --title "NusaDesk $GITHUB_REF_NAME"
+
+  build:
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --mac dmg --arm64 --x64
+            files: app/dist/*.dmg
+          - os: windows-latest
+            args: --win nsis portable --x64
+            files: app/dist/*.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Check the tag matches app/package.json
+        shell: bash
+        run: |
+          v="$(node -p "require('./app/package.json').version")"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != app version v$v"; exit 1; }
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build installers
+        working-directory: app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - name: Upload to the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" ${{ matrix.files }} -R "$GITHUB_REPOSITORY" --clobber

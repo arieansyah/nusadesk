@@ -1,0 +1,145 @@
+name: deploy
+
+# Deploys the maintainer's signaling server instance (GHCR image → server via SSH).
+# It only runs in the upstream repository; forks get CI (ci.yml) but never deploy.
+# To deploy your own instance, see docs/SELF_HOSTING.md or adapt this workflow.
+#
+# Flow: CI → build the image (ghcr.io/<owner>/<repo>-server:<commit-sha>) → on the server:
+#   app-deploy nusadesk <sha> - < server/docker-compose.prod.yml
+# app-deploy is a small server-side script: it pulls the image, runs
+# `docker compose up --wait` and restores the previous release if the
+# healthcheck fails.
+#
+# Repository settings → Secrets and variables → Actions (environment "production"):
+#   secret   SSH_PRIVATE_KEY  deploy key allowed to run app-deploy on the server
+#   secret   SSH_KNOWN_HOSTS  ssh-keyscan output of the server (bare host, no [host]:port)
+#   secret   DEPLOY_HOST      server address (a secret, so it is masked in public logs)
+#   secret   DEPLOY_PORT      SSH port (default 22)
+#
+# The server keeps no GitHub token: the deploy job logs the server in to GHCR with
+# this job's GITHUB_TOKEN (read-only, revoked when the job ends) and logs out after.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - server/**
+      - .github/workflows/deploy.yml
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  APP_NAME: nusadesk
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # workflow_dispatch can be started from any branch: only main reaches production
+  build:
+    needs: ci
+    if: github.repository == 'arieansyah/nusadesk' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      # Layer cache in the registry (:buildcache) keeps rebuilds fast
+      - name: Build image
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}-server"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          docker buildx create --use --driver docker-container
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag "$image:$GITHUB_SHA" \
+            --cache-from "type=registry,ref=$image:buildcache" \
+            --cache-to "type=registry,ref=$image:buildcache,mode=max" \
+            --load \
+            server
+
+      - name: Check the image starts healthy
+        run: |
+          docker run -d --name smoke --read-only --tmpfs /tmp --cap-drop ALL "$IMAGE:$GITHUB_SHA"
+          for i in $(seq 1 20); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' smoke)" = healthy ] && exit 0
+            sleep 2
+          done
+          docker logs smoke
+          exit 1
+
+      - name: Push image
+        run: docker push "$IMAGE:$GITHUB_SHA"
+
+  deploy:
+    needs: build
+    if: github.repository == 'arieansyah/nusadesk' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: production
+      url: ${{ vars.DEPLOY_URL }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host server
+            HostName $DEPLOY_HOST
+            Port ${DEPLOY_PORT:-22}
+            User deploy
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            HostKeyAlias $DEPLOY_HOST
+          EOF
+
+      - name: Log the server in to GHCR (this job's token only)
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | ssh server docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      - name: Release on the server
+        run: ssh server app-deploy "$APP_NAME" "$GITHUB_SHA" - < server/docker-compose.prod.yml
+
+      - name: Log the server out of GHCR
+        if: always()
+        run: ssh server docker logout ghcr.io || true

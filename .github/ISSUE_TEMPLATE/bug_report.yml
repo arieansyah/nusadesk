@@ -1,0 +1,39 @@
+name: Bug report / Laporan bug
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Security vulnerability? Do **not** file it here, see SECURITY.md. / Celah keamanan? Jangan lapor di sini, lihat SECURITY.md."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / Apa yang terjadi?
+      description: Steps to reproduce, what you expected, what you saw.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: NusaDesk version / Versi
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating systems / Sistem operasi
+      multiple: true
+      options: [macOS (Apple Silicon), macOS (Intel), Windows 10, Windows 11, Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: server
+    attributes:
+      label: Signaling server setup
+      options: ["selfhost (Docker + Caddy)", "behind my own reverse proxy", "LAN (ws://)", "other"]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Remove IDs, passwords and IP addresses first.

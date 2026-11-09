@@ -1,0 +1,8 @@
+# TLS certificates are obtained and renewed automatically for {$DOMAIN}.
+# WebSocket upgrades are proxied transparently.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy signaling:8787 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: mediastream:" />
+  <title>NusaDesk</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    html, body { background: #000; overflow: hidden; }
+    body { display: flex; flex-direction: column; }
+    .bar {
+      display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+      background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; flex-wrap: wrap;
+    }
+    .bar button, .bar select {
+      font-size: 12px; padding: 5px 10px; border-radius: 6px;
+      background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    }
+    .bar .sep { width: 1px; height: 18px; background: var(--line); }
+    .bar .title { font-weight: 600; }
+    .bar .sas { color: var(--ok); margin-left: auto; cursor: help; }
+    .bar .stats { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .bar button.on { border-color: var(--accent); color: var(--accent-2); }
+    #stage { flex: 1; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; outline: none; }
+    #stage.actual { overflow: auto; display: block; }
+    video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; cursor: default; }
+    #stage.actual video { width: auto; height: auto; max-width: none; max-height: none; }
+    .overlay {
+      position: absolute; inset: 0; display: flex; flex-direction: column; gap: 14px;
+      align-items: center; justify-content: center; background: var(--bg); text-align: center; padding: 24px;
+    }
+    .overlay h2 { margin: 0; font-weight: 600; }
+    #xferPanel { position: fixed; right: 14px; bottom: 14px; width: 340px; max-height: 50vh; overflow: auto; z-index: 5; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+    #dropZone {
+      position: fixed; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center;
+      background: rgba(229,72,77,.15); border: 3px dashed var(--accent); font-size: 20px; font-weight: 600; pointer-events: none;
+    }
+    #dropZone div { background: var(--panel); padding: 16px 24px; border-radius: var(--radius); }
+    .spinner { width: 34px; height: 34px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <span class="title mono" id="title"></span>
+    <span class="muted" id="peerInfo"></span>
+    <span class="sep"></span>
+    <select id="displaySel" title="Pilih layar"></select>
+    <select id="qualitySel" title="Kualitas">
+      <option value="quality">Kualitas terbaik</option>
+      <option value="balanced" selected>Seimbang</option>
+      <option value="speed">Kecepatan</option>
+    </select>
+    <button id="scaleBtn" title="Ubah skala">Sesuaikan</button>
+    <button id="viewOnlyBtn" title="Hanya lihat (tanpa kontrol)">Hanya lihat</button>
+    <button id="clipBtn" title="Kirim teks clipboard ke komputer remote sekali">Kirim clipboard</button>
+    <button id="clipSyncBtn" title="Sinkronkan clipboard otomatis dua arah selama sesi">Sinkron clipboard: mati</button>
+    <button id="fileBtn" title="Kirim file ke komputer remote (atau seret file ke layar)">Kirim file</button>
+    <input type="file" id="fileInput" multiple class="hidden" />
+    <button id="fsBtn" title="Layar penuh">⛶</button>
+    <button id="endBtn" class="danger">Putuskan</button>
+    <span class="sas mono" id="sas"></span>
+    <span class="stats mono" id="stats"></span>
+  </div>
+  <div id="stage" tabindex="0">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="overlay" id="overlay">
+      <div class="spinner" id="spinner"></div>
+      <h2 id="ovTitle">Menghubungkan…</h2>
+      <div class="muted" id="ovText"></div>
+      <button id="ovClose" class="hidden">Tutup</button>
+    </div>
+  </div>
+  <div id="dropZone" class="hidden"><div>Lepas file untuk dikirim ke komputer remote</div></div>
+  <div id="xferPanel" class="hidden"></div>
+  <script src="secure.js"></script>
+  <script src="transfer.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>

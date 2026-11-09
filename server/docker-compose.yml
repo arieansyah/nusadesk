@@ -1,0 +1,13 @@
+# Local / standalone run: docker compose up -d --build  →  ws://localhost:8787
+# (production uses docker-compose.prod.yml through CI/CD)
+services:
+  signaling:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - data:/data
+
+volumes:
+  data:

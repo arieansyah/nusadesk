@@ -1,0 +1,4 @@
+node_modules/
+dist/
+devices.json
+.DS_Store

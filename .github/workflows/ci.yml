@@ -1,0 +1,56 @@
+name: ci
+
+# Runs on every push and pull request (no secrets needed), and is reused by deploy.yml.
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Security tests (lockout, rate limits, no password relay)
+        working-directory: server
+        run: npm test
+
+      - name: Syntax check
+        run: |
+          node --check server/index.js
+          for f in app/src/*.js; do node --check "$f"; done
+
+      - name: Smoke test (register two devices, relay a connect request)
+        working-directory: server
+        run: |
+          PORT=18787 NUSADESK_DB="$RUNNER_TEMP/devices.json" node index.js &
+          for i in $(seq 1 20); do curl -fs localhost:18787/health && break; sleep 0.5; done
+          node -e '
+            const open = (id) => new Promise((res) => {
+              const ws = new WebSocket("ws://localhost:18787");
+              ws.onopen = () => ws.send(JSON.stringify({ type: "register", id, deviceKey: "ci-key-" + id + "-0000000000" }));
+              ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === "registered") res(ws); };
+            });
+            (async () => {
+              const host = await open("111111111");
+              const viewer = await open("222222222");
+              host.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === "incoming") { console.log("relay ok"); process.exit(0); } };
+              viewer.send(JSON.stringify({ type: "connect-request", target: "111111111", password: "" }));
+              setTimeout(() => { console.error("no relay"); process.exit(1); }, 3000);
+            })();'

@@ -1,0 +1,47 @@
+# Production stack of the maintainer's instance, released by .github/workflows/deploy.yml
+# (not run by hand):
+#   - IMAGE_TAG comes from .env next to this file, written by the deploy script
+#   - network "proxy" is an existing Traefik reverse proxy that terminates TLS
+# WebSocket upgrades pass through Traefik without extra config.
+# Only signaling goes through here: screen, input and files flow peer-to-peer.
+# Running your own server? Use docs/SELF_HOSTING.md instead.
+
+services:
+  signaling:
+    image: ghcr.io/arieansyah/nusadesk-server:${IMAGE_TAG:?IMAGE_TAG is set by app-deploy}
+    restart: unless-stopped
+    environment:
+      PORT: "8787"
+      NUSADESK_DB: /data/devices.json
+      # Only the CDN reaches the proxy, so CF-Connecting-IP / X-Forwarded-For can be trusted
+      TRUST_PROXY: "1"
+    volumes:
+      - data:/data
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.nusadesk.rule=Host(`nusadeck.girex.id`)
+      - traefik.http.services.nusadesk.loadbalancer.server.port=8787
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    pids_limit: 64
+
+networks:
+  proxy:
+    external: true
+
+volumes:
+  data:

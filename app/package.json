@@ -1,0 +1,94 @@
+{
+  "name": "nusadesk",
+  "version": "1.1.0",
+  "description": "NusaDesk — open-source cross-platform remote desktop (macOS & Windows)",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:test-host": "NUSADESK_PROFILE=hostA NUSADESK_FAKE_SCREEN=1 electron .",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist": "electron-builder --mac --win",
+    "test": "node test/e2e.js"
+  },
+  "author": "Arieansyah",
+  "type": "commonjs",
+  "dependencies": {
+    "@jitsi/robotjs": "^0.6.24"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  },
+  "productName": "NusaDesk",
+  "build": {
+    "appId": "id.nusadesk.app",
+    "productName": "NusaDesk",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@jitsi/robotjs/**"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "NusaDesk perlu merekam layar agar orang yang Anda izinkan dapat melihat komputer ini.",
+        "NSAppleEventsUsageDescription": "NusaDesk perlu mengontrol input untuk akses jarak jauh."
+      },
+      "identity": "-"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "npmRebuild": false,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "loadBrowserProcessSpecificV8Snapshot": false,
+      "grantFileProtocolExtraPrivileges": true
+    }
+  },
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arieansyah/nusadesk.git",
+    "directory": "app"
+  },
+  "homepage": "https://github.com/arieansyah/nusadesk"
+}

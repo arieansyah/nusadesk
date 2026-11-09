@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+  <title>NusaDesk</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { display: flex; flex-direction: column; }
+    header {
+      display: flex; align-items: center; gap: 10px; padding: 14px 20px;
+      border-bottom: 1px solid var(--line); -webkit-app-region: drag;
+    }
+    header button { -webkit-app-region: no-drag; }
+    .brand { font-weight: 700; font-size: 16px; letter-spacing: .2px; }
+    .brand b { color: var(--accent); }
+    .status { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+    main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 20px; overflow: auto; align-content: start; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+    .card h2 { margin: 0 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 600; }
+    .bigid { font-size: 34px; font-weight: 700; letter-spacing: 1px; margin: 10px 0 4px; user-select: all; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .pw { font-size: 18px; letter-spacing: 1px; }
+    .connect-id { font-size: 20px; letter-spacing: 1px; padding: 12px 14px; }
+    .full { grid-column: 1 / -1; }
+    .recent { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .recent button { font-size: 12px; padding: 6px 10px; }
+    .err { color: var(--accent-2); font-size: 12px; min-height: 16px; margin-top: 8px; }
+    .banner { background: #2a1d0b; border: 1px solid #5a3d0f; color: #ffd18a; border-radius: var(--radius); padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .banner button { font-size: 12px; padding: 6px 10px; }
+    .sessions .s { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+    .sessions .s:first-of-type { border-top: 0; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 10; }
+    .modal { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; width: min(420px, 90vw); box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .modal h3 { margin: 0 0 8px; }
+    .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+    label.check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 13px; margin-top: 16px; cursor: pointer; }
+    label.check input { width: auto; }
+    #downloadDirText { margin-top: 4px; word-break: break-all; }
+    .sessions .s .actions { display: flex; gap: 6px; }
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><b>Nusa</b>Desk</div>
+    <div class="status"><span id="dot" class="dot"></span><span id="statusText">Menghubungkan…</span></div>
+    <button class="ghost" id="settingsBtn" title="Pengaturan">⚙︎ Pengaturan</button>
+  </header>
+
+  <main>
+    <div id="permBanner" class="banner full hidden"></div>
+
+    <section class="card full hidden" id="serverSetup">
+      <h2>Atur server sinyal</h2>
+      <div class="muted small">NusaDesk butuh server sinyal untuk mempertemukan perangkat lewat ID. Jalankan server Anda sendiri (lihat <span class="mono">docs/SELF_HOSTING.md</span>) lalu masukkan alamatnya. Semua perangkat yang ingin saling terhubung harus memakai server yang sama.</div>
+      <div class="row" style="margin-top:12px">
+        <input id="setupServer" class="mono" placeholder="wss://remote.contoh.com" autocomplete="off" />
+        <button class="primary" id="setupSave">Simpan</button>
+      </div>
+      <div class="err" id="setupErr"></div>
+    </section>
+
+    <section class="card">
+      <h2>Komputer ini</h2>
+      <div class="muted small">Berikan ID dan kata sandi ini ke orang yang ingin mengakses komputer Anda.</div>
+      <div class="bigid mono" id="myId">— — —</div>
+      <label>Kata sandi sesi</label>
+      <div class="row">
+        <input id="myPw" class="mono pw" readonly />
+        <button id="copyBtn" title="Salin ID dan kata sandi">Salin</button>
+        <button id="refreshPw" title="Buat kata sandi baru">↻</button>
+      </div>
+      <div class="muted small" style="margin-top:10px">Tanpa kata sandi, setiap permintaan harus Anda setujui dulu. Kata sandi diperiksa langsung oleh komputer ini, tidak pernah dikirim ke server.</div>
+    </section>
+
+    <section class="card">
+      <h2>Kontrol komputer lain</h2>
+      <div class="muted small">Masukkan ID 9 digit komputer tujuan.</div>
+      <label>ID tujuan</label>
+      <input id="targetId" class="mono connect-id" placeholder="123 456 789" inputmode="numeric" autocomplete="off" />
+      <label>Kata sandi (opsional)</label>
+      <input id="targetPw" type="password" placeholder="Kosongkan untuk minta persetujuan" autocomplete="off" />
+      <div class="row" style="margin-top:14px">
+        <button class="primary" id="connectBtn" style="flex:1">Hubungkan</button>
+      </div>
+      <div class="err" id="connectErr"></div>
+      <div class="recent" id="recent"></div>
+    </section>
+
+    <section class="card full sessions hidden" id="sessionsCard">
+      <h2>Sesi aktif di komputer ini</h2>
+      <div id="sessions"></div>
+      <input type="file" id="hostFileInput" multiple class="hidden" />
+    </section>
+
+    <section class="full hidden" id="hostXfer"></section>
+  </main>
+
+  <!-- incoming request -->
+  <div class="modal-bg hidden" id="incomingModal">
+    <div class="modal">
+      <h3>Permintaan akses masuk</h3>
+      <div><b id="inName"></b> <span class="muted mono" id="inId"></span> ingin melihat dan mengontrol komputer ini.</div>
+      <div class="muted small" style="margin-top:8px">Hanya terima jika Anda mengenal orang ini.</div>
+      <div class="actions">
+        <button id="rejectBtn">Tolak</button>
+        <button class="primary" id="acceptBtn">Terima</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- settings -->
+  <div class="modal-bg hidden" id="settingsModal">
+    <div class="modal">
+      <h3>Pengaturan</h3>
+      <label>Nama perangkat</label>
+      <input id="setName" />
+      <label>Server sinyal (ws:// atau wss://)</label>
+      <input id="setServer" class="mono" />
+      <label>Kata sandi akses tanpa pengawasan (unattended)</label>
+      <div class="row">
+        <input id="setUnattended" type="password" placeholder="Kosong = nonaktif" autocomplete="new-password" />
+        <button id="clearUnattended" class="danger hidden" title="Nonaktifkan akses tanpa pengawasan">Nonaktifkan</button>
+      </div>
+      <div class="muted small" style="margin-top:6px">Minimal 8 karakter. Jika diisi, kata sandi ini selalu bisa dipakai untuk masuk tanpa persetujuan. Disimpan terenkripsi (Keychain / DPAPI), bukan teks biasa.</div>
+      <div class="err" id="settingsErr"></div>
+      <label class="check"><input type="checkbox" id="setAllowFiles" /> Izinkan orang yang terhubung mengirim file ke komputer ini</label>
+      <div class="muted small" id="downloadDirText"></div>
+      <div class="muted small" style="margin-top:12px" id="versionText"></div>
+      <div class="actions">
+        <button id="settingsCancel">Batal</button>
+        <button class="primary" id="settingsSave">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="secure.js"></script>
+  <script src="transfer.js"></script>
+  <script src="host.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
