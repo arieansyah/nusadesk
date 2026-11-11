@@ -1,20 +1,26 @@
 # Production stack of the maintainer's instance, released by .github/workflows/deploy.yml
 # (not run by hand):
 #   - IMAGE_TAG comes from .env next to this file, written by the deploy script
+#   - app.env next to this file holds the environment managed by the server's
+#     configuration (Ansible): TURN_SECRET, TURN_EXTERNAL_IP, TURN_PRIVATE_IP
 #   - network "proxy" is an existing Traefik reverse proxy that terminates TLS
 # WebSocket upgrades pass through Traefik without extra config.
-# Only signaling goes through here: screen, input and files flow peer-to-peer.
+# Screen, input and files flow peer-to-peer; when the networks block that, they go
+# through the TURN relay below (still end-to-end encrypted, the relay cannot read them).
 # Running your own server? Use docs/SELF_HOSTING.md instead.
 
 services:
   signaling:
     image: ghcr.io/arieansyah/nusadesk-server:${IMAGE_TAG:?IMAGE_TAG is set by app-deploy}
     restart: unless-stopped
+    env_file: app.env # TURN_SECRET
     environment:
       PORT: "8787"
       NUSADESK_DB: /data/devices.json
       # Only the CDN reaches the proxy, so CF-Connecting-IP / X-Forwarded-For can be trusted
       TRUST_PROXY: "1"
+      # DNS-only record (not proxied by the CDN): TURN cannot pass through an HTTP proxy
+      TURN_URLS: "turn:turn.girex.id:3478?transport=udp,turn:turn.girex.id:3478?transport=tcp"
     volumes:
       - data:/data
     networks:
@@ -38,6 +44,80 @@ services:
       - ALL
     mem_limit: 128m
     pids_limit: 64
+
+  # TURN relay (coturn). Host networking: a relay needs a large UDP port range, which
+  # Docker's port publishing handles badly. The firewall opens 3478/udp+tcp and the
+  # relay range 49160-49259/udp. Credentials are short-lived (TURN REST API): the
+  # signaling server signs them with the same TURN_SECRET, per session.
+  turn:
+    image: coturn/coturn:4.18.0-alpine
+    restart: unless-stopped
+    network_mode: host
+    env_file: app.env # TURN_SECRET, TURN_EXTERNAL_IP (public), TURN_PRIVATE_IP (this VPS is behind 1:1 NAT)
+    entrypoint: ["/bin/sh", "-c"]
+    # The config is written to tmpfs so the secret never shows up in the process list.
+    # denied-peer-ip: no relaying into private, loopback or special networks (the
+    # provider's network, Docker networks with the database, ...).
+    command:
+      - |
+        set -eu
+        [ -n "$${TURN_SECRET:-}" ] && [ -n "$${TURN_EXTERNAL_IP:-}" ] && [ -n "$${TURN_PRIVATE_IP:-}" ] || {
+          echo "turn: TURN_SECRET, TURN_EXTERNAL_IP and TURN_PRIVATE_IP must be set in app.env" >&2; exit 1; }
+        cat > /tmp/turnserver.conf <<EOF
+        listening-port=3478
+        listening-ip=$${TURN_PRIVATE_IP}
+        relay-ip=$${TURN_PRIVATE_IP}
+        external-ip=$${TURN_EXTERNAL_IP}/$${TURN_PRIVATE_IP}
+        min-port=49160
+        max-port=49259
+        realm=girex.id
+        use-auth-secret
+        static-auth-secret=$${TURN_SECRET}
+        fingerprint
+        no-tls
+        no-tcp-relay
+        no-multicast-peers
+        denied-peer-ip=0.0.0.0-0.255.255.255
+        denied-peer-ip=10.0.0.0-10.255.255.255
+        denied-peer-ip=100.64.0.0-100.127.255.255
+        denied-peer-ip=127.0.0.0-127.255.255.255
+        denied-peer-ip=169.254.0.0-169.254.255.255
+        denied-peer-ip=172.16.0.0-172.31.255.255
+        denied-peer-ip=192.0.0.0-192.0.0.255
+        denied-peer-ip=192.0.2.0-192.0.2.255
+        denied-peer-ip=192.168.0.0-192.168.255.255
+        denied-peer-ip=198.18.0.0-198.19.255.255
+        denied-peer-ip=198.51.100.0-198.51.100.255
+        denied-peer-ip=203.0.113.0-203.0.113.255
+        denied-peer-ip=224.0.0.0-255.255.255.255
+        user-quota=8
+        total-quota=100
+        max-bps=3000000
+        stale-nonce=600
+        userdb=/tmp/turndb
+        pidfile=/tmp/turnserver.pid
+        log-file=stdout
+        simple-log
+        EOF
+        exec turnserver -c /tmp/turnserver.conf
+    healthcheck:
+      test: ["CMD-SHELL", "turnutils_stunclient -p 3478 \"$$TURN_PRIVATE_IP\" > /dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # turnserver carries this file capability: without it in the bounding set exec fails
+    cap_add:
+      - NET_BIND_SERVICE
+    mem_limit: 256m
+    pids_limit: 128
 
 networks:
   proxy:

@@ -2,6 +2,7 @@
 // and forwards the viewer's input events to the main process for injection.
 'use strict';
 
+// Fallback only: the main process passes the real config (STUN + per-session TURN relay).
 const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
 
 const NusaHost = {
@@ -61,7 +62,7 @@ function tuneSender(sender, quality) {
   sender.setParameters(p).catch((err) => console.warn('setParameters', err));
 }
 
-async function startHostSession({ sessionId, from, name, viaPassword, needsAuth }) {
+async function startHostSession({ sessionId, from, name, viaPassword, needsAuth, rtc }) {
   const s = {
     sessionId, from, name, viaPassword, pc: null, stream: null, sender: null,
     ctl: null, move: null, quality: 'balanced', displayId: null, pendingIce: [], state: 'menghubungkan',
@@ -71,7 +72,7 @@ async function startHostSession({ sessionId, from, name, viaPassword, needsAuth 
   NusaHost.sessions.set(sessionId, s);
   changed();
 
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const pc = new RTCPeerConnection(rtc || { iceServers: ICE_SERVERS });
   s.pc = pc;
   pc.onicecandidate = (e) => { if (e.candidate) nusa.signal(sessionId, { ice: e.candidate.toJSON() }); };
   pc.onconnectionstatechange = () => {

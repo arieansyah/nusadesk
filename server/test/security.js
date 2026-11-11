@@ -10,7 +10,10 @@ const assert = require('assert');
 const PORT = 20000 + Math.floor(Math.random() * 20000);
 const DB = path.join(os.tmpdir(), `nusadesk-sec-${process.pid}.json`);
 const srv = spawn(process.execPath, [path.join(__dirname, '..', 'index.js')], {
-  env: { ...process.env, PORT: String(PORT), NUSADESK_DB: DB, LIMIT_NEW_IDS_PER_IP: '20', LIMIT_CONNECT_PER_IP: '1000', LIMIT_SOCKETS_PER_IP: '30' },
+  env: {
+    ...process.env, PORT: String(PORT), NUSADESK_DB: DB, LIMIT_NEW_IDS_PER_IP: '20', LIMIT_CONNECT_PER_IP: '1000', LIMIT_SOCKETS_PER_IP: '30',
+    TURN_SECRET: 'test-turn-secret', TURN_URLS: 'turn:turn.example.com:3478?transport=udp, turn:turn.example.com:3478?transport=tcp, http://bad', TURN_TTL: '3600',
+  },
   stdio: 'ignore',
 });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -66,6 +69,36 @@ async function test(name, fn) {
     const r = await v.next((m) => m.type === 'connect-result');
     assert.deepStrictEqual(r.auth, { required: true, salt: 'abc', iters: 1000, nonce: 'n1' });
     v.close();
+  });
+
+  await test('kredensial TURN sementara untuk host dan viewer', async () => {
+    const crypto = require('crypto');
+    const check = (ice, id) => {
+      assert.ok(Array.isArray(ice) && ice.length === 1, 'no TURN server issued');
+      const [t] = ice;
+      assert.deepStrictEqual(t.urls, ['turn:turn.example.com:3478?transport=udp', 'turn:turn.example.com:3478?transport=tcp']);
+      const [exp, who] = t.username.split(':');
+      assert.strictEqual(who, id);
+      const left = Number(exp) - Date.now() / 1000;
+      assert.ok(left > 3500 && left <= 3600, `unexpected expiry in ${left}s`);
+      assert.strictEqual(t.credential, crypto.createHmac('sha1', 'test-turn-secret').update(t.username).digest('base64'));
+    };
+    const v = await client('210000001');
+    v.sendJson({ type: 'connect-request', target: '100000001', mode: 'ask' });
+    const inc = await host.next((m) => m.type === 'incoming');
+    check(inc.ice, '100000001');
+    host.sendJson({ type: 'connect-response', sessionId: inc.sessionId, accepted: true, auth: { required: false } });
+    const r = await v.next((m) => m.type === 'connect-result');
+    check(r.ice, '210000001');
+    v.sendJson({ type: 'end', sessionId: inc.sessionId });
+    await host.next((m) => m.type === 'session-ended');
+    // a rejected request gets no credentials
+    const v2 = await client('210000002');
+    v2.sendJson({ type: 'connect-request', target: '100000001', mode: 'ask' });
+    const inc2 = await host.next((m) => m.type === 'incoming');
+    host.sendJson({ type: 'connect-response', sessionId: inc2.sessionId, accepted: false, reason: 'rejected' });
+    assert.strictEqual((await v2.next((m) => m.type === 'connect-result')).ice, null);
+    v.close(); v2.close();
   });
 
   await test('host spam: maksimal 3 permintaan menunggu per host', async () => {

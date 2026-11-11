@@ -42,7 +42,9 @@ end-to-end encrypted. You run the small signaling server yourself.
 | Signaling server (`server/`) | Node.js + [`ws`](https://github.com/websockets/ws), Docker |
 
 The signaling server only introduces the two devices and relays connection
-metadata. **Screen, input, files and passwords never pass through it.**
+metadata. **Screen, input, files and passwords never pass through it.** When the
+networks block a direct connection (CGNAT, strict firewalls), the session goes through
+an optional TURN relay that you run next to it, still end-to-end encrypted.
 
 ## Quick start
 
@@ -140,6 +142,9 @@ them to a GitHub Release (`.github/workflows/release.yml`).
 - **Verification code:** both sides show a 6-digit code derived from both DTLS
   fingerprints. Different codes mean the connection is being intercepted. This is the
   protection for approval-mode sessions, which have no shared secret.
+- **TURN relay (optional):** the server issues short-lived TURN credentials per session
+  (HMAC of a secret shared with coturn), so no relay password ships in the app. The
+  relay only forwards encrypted packets.
 - **Server limits:** per-IP rate limits (connections, new IDs, requests, message
   floods), at most 3 pending requests per host, wrong-password lockout for 15 min
   (5 per IP+host, 20 per IP, 50 per host), device-ID ownership keys, inactive IDs
@@ -157,15 +162,17 @@ them to a GitHub Release (`.github/workflows/release.yml`).
   try to guess the password offline. Use long passwords: the active attack itself
   fails and is visible.
 - Peer-to-peer means both public IP addresses are visible to each other.
-- Some networks block direct connections; a TURN server is then required.
+- Some networks block direct connections; sessions between them need a TURN relay
+  ([setup](docs/SELF_HOSTING.md#when-connections-fail-turn)). Relayed sessions use the
+  relay server's bandwidth.
 
 Found a vulnerability? Please follow [SECURITY.md](SECURITY.md). Don't open a public issue.
 
 ## Roadmap ideas
 
-Audio, chat, session recording, remote file browser and folder transfer, TURN
-configuration in the UI, Linux host support, UI translations (the UI is currently in
-Indonesian), code signing and auto-update. Contributions welcome!
+Audio, chat, session recording, remote file browser and folder transfer, Linux host
+support, UI translations (the UI is currently in Indonesian), code signing and
+auto-update. Contributions welcome!
 
 ## Contributing
 

@@ -65,6 +65,23 @@ function saveConfig() {
 // the viewer sends HMAC(K, nonce | hostFingerprint | viewerFingerprint) inside the
 // encrypted channel. Binding the DTLS fingerprints means a signaling server that swaps
 // them (man-in-the-middle) produces a proof that does not verify on the host.
+// ---------- WebRTC connection settings ----------
+// STUN finds a direct path; the TURN relay that the signaling server issues per session
+// (short-lived credentials) is the fallback when networks block direct connections.
+const STUN_SERVERS = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+const FORCE_RELAY = devEnv('NUSADESK_FORCE_RELAY') === '1'; // test: allow only relayed paths
+const incomingIce = new Map(); // sessionId -> TURN servers of an unanswered request
+
+function rtcConfig(ice) {
+  const str = (v) => typeof v === 'string' && v.length <= 256;
+  const turn = (Array.isArray(ice) ? ice : []).slice(0, 4).flatMap((s) => {
+    const urls = (Array.isArray(s?.urls) ? s.urls : [s?.urls]).filter((u) => str(u) && /^(turns?|stun):/.test(u)).slice(0, 8);
+    if (!urls.length || !str(s.username) || !str(s.credential)) return [];
+    return [{ urls, username: s.username, credential: s.credential }];
+  });
+  return { iceServers: [...STUN_SERVERS, ...turn], iceTransportPolicy: FORCE_RELAY ? 'relay' : 'all' };
+}
+
 const AUTH_ITERS = 210000;
 const PW_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no 0/o/1/l/i
 let sessionKey = null;
@@ -273,7 +290,8 @@ function onSignal(msg) {
         win?.webContents.send('viewer-event', { type: 'result', accepted: false, reason: msg.reason });
         break;
       }
-      viewerWins.get(msg.sessionId)?.webContents.send('viewer-event', { ...msg, type: 'result' });
+      const { ice, ...result } = msg;
+      viewerWins.get(msg.sessionId)?.webContents.send('viewer-event', { ...result, type: 'result', rtc: rtcConfig(ice) });
       break;
     }
     case 'signal':
@@ -303,11 +321,13 @@ function handleIncoming(msg) {
     authPending.set(msg.sessionId, { nonce, from: msg.from, name: msg.name });
     setTimeout(() => authPending.delete(msg.sessionId), 60000);
     hostSessions.add(msg.sessionId);
-    mainWin?.webContents.send('host-start', { sessionId: msg.sessionId, from: msg.from, name: msg.name, viaPassword: true, needsAuth: true });
+    mainWin?.webContents.send('host-start', { sessionId: msg.sessionId, from: msg.from, name: msg.name, viaPassword: true, needsAuth: true, rtc: rtcConfig(msg.ice) });
     sig({ type: 'connect-response', sessionId: msg.sessionId, accepted: true, auth: { required: true, salt: config.salt, iters: AUTH_ITERS, nonce } });
     return;
   }
   // No password: ask the person at this computer.
+  incomingIce.set(msg.sessionId, msg.ice);
+  setTimeout(() => incomingIce.delete(msg.sessionId), 3 * 60 * 1000);
   mainWin?.webContents.send('incoming-request', { sessionId: msg.sessionId, from: msg.from, name: msg.name });
   if (mainWin) {
     if (mainWin.isMinimized()) mainWin.restore();
@@ -321,7 +341,9 @@ function handleIncoming(msg) {
 
 function acceptIncoming(msg, viaPassword) {
   hostSessions.add(msg.sessionId);
-  mainWin?.webContents.send('host-start', { sessionId: msg.sessionId, from: msg.from, name: msg.name, viaPassword, needsAuth: false });
+  const rtc = rtcConfig(incomingIce.get(msg.sessionId));
+  incomingIce.delete(msg.sessionId);
+  mainWin?.webContents.send('host-start', { sessionId: msg.sessionId, from: msg.from, name: msg.name, viaPassword, needsAuth: false, rtc });
   sig({ type: 'connect-response', sessionId: msg.sessionId, accepted: true, auth: { required: false } });
 }
 

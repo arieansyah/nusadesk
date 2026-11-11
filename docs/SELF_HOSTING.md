@@ -87,25 +87,65 @@ end-to-end encrypted and passwords are never sent to the server.
 | `LIMIT_NEW_IDS_PER_IP` | `20` | New device IDs per IP per hour |
 | `LIMIT_CONNECT_PER_IP` | `20` | Connection requests per IP per minute |
 | `MAX_DEVICES` | `200000` | Maximum stored device IDs |
+| `TURN_SECRET` | none | Shared secret with your TURN server (`static-auth-secret` in coturn). Enables TURN together with `TURN_URLS` |
+| `TURN_URLS` | none | Comma-separated TURN URLs handed to the apps, e.g. `turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp` |
+| `TURN_TTL` | `86400` | Lifetime of the issued TURN credentials, in seconds |
 
 Health check: `GET /health` → `{"ok":true,"online":<devices>,"sessions":<sessions>}`
 
 ## When connections fail: TURN
 
-If the session stays at "Membuat koneksi…" and then fails, a firewall or symmetric NAT
-is blocking direct peer-to-peer traffic. A TURN relay (for example
-[coturn](https://github.com/coturn/coturn)) fixes this. TURN uses UDP/TCP 3478 (+ a
-relay port range), so it cannot sit behind an HTTP proxy or the Cloudflare proxy.
-Add it to `ICE_SERVERS` in `app/src/host.js` and `app/src/viewer.js`:
+If a session fails with *"Koneksi peer-to-peer gagal"*, the networks block direct
+peer-to-peer traffic (mobile data and many ISPs use CGNAT, office Wi-Fi often blocks
+UDP). A TURN relay fixes this: when no direct path exists, the encrypted session goes
+through the relay. The relay cannot read it (DTLS/SRTP end to end, and the password
+proof is bound to both peers' certificates).
 
-```js
-const ICE_SERVERS = [
-  { urls: ['stun:stun.l.google.com:19302'] },
-  { urls: ['turn:turn.example.com:3478'], username: 'user', credential: 'pass' },
-];
-```
+The signaling server hands every session short-lived TURN credentials (the
+[TURN REST API](https://datatracker.ietf.org/doc/html/draft-uberti-behave-turn-rest-00)
+scheme that coturn implements with `use-auth-secret`). No TURN password ships in the
+app; you only set the same secret on both servers.
 
-(Making TURN configurable in the UI is on the roadmap.)
+1. Run [coturn](https://github.com/coturn/coturn) on a machine with a public IP
+   (it can be the same one). TURN cannot sit behind an HTTP proxy or the Cloudflare
+   proxy: use a DNS-only record such as `turn.example.com`.
+
+   ```bash
+   SECRET=$(openssl rand -hex 32)
+   docker run -d --name turn --restart unless-stopped --network host \
+     coturn/coturn:4.18.0-alpine -n --listening-port=3478 \
+     --min-port=49160 --max-port=49259 --realm=example.com \
+     --use-auth-secret --static-auth-secret="$SECRET" \
+     --fingerprint --no-tls --no-tcp-relay --no-multicast-peers \
+     --denied-peer-ip=10.0.0.0-10.255.255.255 --denied-peer-ip=172.16.0.0-172.31.255.255 \
+     --denied-peer-ip=192.168.0.0-192.168.255.255 --denied-peer-ip=127.0.0.0-127.255.255.255 \
+     --log-file=stdout --simple-log --userdb=/tmp/turndb
+   ```
+
+   Behind 1:1 NAT (many cloud VPS have only a private address on the interface), add
+   `--external-ip=<public-ip>/<private-ip>`. The `denied-peer-ip` ranges stop the
+   relay from being used to reach your private networks. A complete, hardened example
+   is the `turn` service in [`server/docker-compose.prod.yml`](../server/docker-compose.prod.yml).
+
+2. Open UDP and TCP 3478 and the relay range UDP 49160-49259 in the firewall.
+
+3. Give the signaling server the same secret and the TURN URLs:
+
+   ```bash
+   TURN_SECRET=$SECRET \
+   TURN_URLS='turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp'
+   ```
+
+   (as `environment:` in `selfhost/docker-compose.yml`, or `-e` with `docker run`).
+   The server log says `TURN relay turn:...` at startup when it is enabled.
+
+In the viewer window the connection stats end with `relay` when a session goes through
+TURN and `P2P` when it is direct. A relayed session uses roughly 1-5 Mbps of the TURN
+server's bandwidth, depending on the quality mode.
+
+To test a relay end to end, run the app tests with
+`NUSADESK_E2E_TURN_URLS=turn:<host>:3478 NUSADESK_E2E_TURN_SECRET=<secret> npm test`
+(in `app/`): one session is forced to use only relayed paths.
 
 ## Updating
 

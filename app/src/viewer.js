@@ -3,6 +3,7 @@
 
 const $ = (id) => document.getElementById(id);
 const fmt = (id) => String(id).replace(/(\d{3})(?=\d)/g, '$1 ');
+// Fallback only: the main process passes the real config (STUN + per-session TURN relay).
 const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
 
 const target = new URLSearchParams(location.search).get('target') || '';
@@ -36,7 +37,8 @@ const REASONS = {
   self: 'Tidak bisa terhubung ke komputer sendiri.',
   'peer-disconnected': 'Komputer tujuan terputus dari server.',
   'peer-ended': 'Sesi diakhiri oleh komputer tujuan.',
-  failed: 'Koneksi peer-to-peer gagal. Jaringan mungkin memblokir koneksi langsung (butuh server TURN).',
+  failed: 'Koneksi peer-to-peer gagal. Jaringan memblokir koneksi langsung dan server ini belum menyediakan relay (TURN).',
+  'failed-relay': 'Koneksi gagal, juga lewat server relay. Periksa koneksi internet kedua komputer, atau firewall yang memblokir port 3478.',
 };
 
 function overlay(title, text, { spinner = true, closable = false } = {}) {
@@ -69,7 +71,7 @@ nusa.onViewerEvent(async (ev) => {
       auth = ev.auth || { required: false };
       authorized = !auth.required;
       overlay('Membuat koneksi…', auth.required ? 'Menyiapkan koneksi terenkripsi untuk verifikasi kata sandi.' : 'Permintaan diterima, menyiapkan koneksi aman.');
-      setupPeer();
+      setupPeer(ev.rtc);
       break;
     case 'signal':
       await onSignal(ev.data || {});
@@ -80,8 +82,10 @@ nusa.onViewerEvent(async (ev) => {
   }
 });
 
-function setupPeer() {
-  pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+let hasRelay = false; // the server issued TURN credentials for this session
+function setupPeer(rtc) {
+  hasRelay = !!rtc?.iceServers?.some((s) => s.username);
+  pc = new RTCPeerConnection(rtc || { iceServers: ICE_SERVERS });
   pc.onicecandidate = (e) => { if (e.candidate) __iceOut++, nusa.signal(sessionId, { ice: e.candidate.toJSON() }); };
   pc.ontrack = (e) => {
     video.srcObject = e.streams[0] || new MediaStream([e.track]);
@@ -104,7 +108,7 @@ function setupPeer() {
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'connected' && authorized) { hideOverlay(); stage.focus(); }
     if (pc.connectionState === 'disconnected') overlay('Koneksi terganggu…', 'Mencoba menyambung kembali.');
-    if (pc.connectionState === 'failed') fail('failed');
+    if (pc.connectionState === 'failed') fail(hasRelay ? 'failed-relay' : 'failed');
   };
 }
 
@@ -324,7 +328,7 @@ let lastBytes = 0, lastTs = 0;
 setInterval(async () => {
   if (!pc || pc.connectionState !== 'connected' || !authorized) return;
   const stats = await pc.getStats();
-  let fps = 0, bytes = 0, ts = 0, rtt = null, w = 0, h = 0, pairLocal = null, codec = '';
+  let fps = 0, bytes = 0, ts = 0, rtt = null, w = 0, h = 0, pair = null, codec = '';
   const byId = new Map();
   stats.forEach((s) => byId.set(s.id, s));
   stats.forEach((s) => {
@@ -333,13 +337,17 @@ setInterval(async () => {
       w = s.frameWidth || 0; h = s.frameHeight || 0;
       const c = byId.get(s.codecId); if (c) codec = c.mimeType.split('/')[1];
     }
-    if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') {
-      rtt = s.currentRoundTripTime; pairLocal = byId.get(s.localCandidateId);
-    }
+    if (s.type === 'transport' && s.selectedCandidatePairId) pair = byId.get(s.selectedCandidatePairId);
+    if (!pair && s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s;
   });
+  if (pair) rtt = pair.currentRoundTripTime;
   const mbps = lastTs ? ((bytes - lastBytes) * 8) / ((ts - lastTs) / 1000) / 1e6 : 0;
   lastBytes = bytes; lastTs = ts;
-  const route = pairLocal?.candidateType === 'relay' ? 'relay' : 'P2P';
+  // "relay" when either side goes through a TURN server. In relay-only mode the local side
+  // may show up as peer-reflexive (the relay's address as the peer saw it).
+  const relayed = pc.getConfiguration().iceTransportPolicy === 'relay'
+    || [pair?.localCandidateId, pair?.remoteCandidateId].some((id) => byId.get(id)?.candidateType === 'relay');
+  const route = relayed ? 'relay' : 'P2P';
   $('stats').textContent = `${w}×${h} · ${Math.round(fps)} fps · ${mbps.toFixed(1)} Mbps · ${rtt != null ? Math.round(rtt * 1000) + ' ms' : '–'} · ${codec} · ${route}`;
 }, 1000);
 
@@ -399,4 +407,5 @@ window.__nusaTest = () => ({
   overlay: $('ovTitle').textContent + ' / ' + $('ovText').textContent, ctl: ctl?.readyState, move: move?.readyState, peer: $('peerInfo').textContent, stats: $('stats').textContent,
   transfers: NusaTransfer.list().map(({ channel, decide, ...t }) => t),
   authorized, sas: $('sas').textContent, ended,
+  policy: pc?.getConfiguration().iceTransportPolicy, relayServers: (pc?.getConfiguration().iceServers || []).filter((x) => x.username).length,
 });

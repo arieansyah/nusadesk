@@ -1,6 +1,10 @@
 // End-to-end test: signaling server + two NusaDesk instances (host in fake-screen mode).
 // The viewer auto-connects with the host's unattended password and reports whether
 // WebRTC connected, video frames arrived and data channels opened.
+//
+// Optional relay check: with NUSADESK_E2E_TURN_URLS + NUSADESK_E2E_TURN_SECRET set (a coturn
+// with use-auth-secret, see docs/SELF_HOSTING.md), the server issues TURN credentials and a
+// third viewer connects with relayed paths only (NUSADESK_FORCE_RELAY).
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -15,7 +19,9 @@ const appData = process.platform === 'darwin'
   ? path.join(os.homedir(), 'Library', 'Application Support')
   : process.platform === 'win32' ? process.env.APPDATA : path.join(os.homedir(), '.config');
 
-const profiles = ['e2eHost', 'e2eViewer', 'e2eViewer2'].map((p) => path.join(appData, `NusaDesk-${p}`));
+const TURN = process.env.NUSADESK_E2E_TURN_URLS && process.env.NUSADESK_E2E_TURN_SECRET
+  ? { TURN_URLS: process.env.NUSADESK_E2E_TURN_URLS, TURN_SECRET: process.env.NUSADESK_E2E_TURN_SECRET } : null;
+const profiles = ['e2eHost', 'e2eViewer', 'e2eViewer2', 'e2eViewer3'].map((p) => path.join(appData, `NusaDesk-${p}`));
 profiles.forEach((d) => fs.rmSync(d, { recursive: true, force: true }));
 fs.mkdirSync(profiles[0], { recursive: true });
 fs.writeFileSync(path.join(profiles[0], 'config.json'), JSON.stringify({
@@ -71,7 +77,7 @@ function runViewer(profile, autoconnect, env = {}) {
   });
 }
 
-run(process.execPath, [path.join(appDir, '..', 'server', 'index.js')], { PORT: String(PORT), NUSADESK_DB: dbFile }, 'server');
+run(process.execPath, [path.join(appDir, '..', 'server', 'index.js')], { PORT: String(PORT), NUSADESK_DB: dbFile, ...(TURN || {}) }, 'server');
 setTimeout(() => {
   const host = run(electron, ['.'], { NUSADESK_PROFILE: 'e2eHost', NUSADESK_FAKE_SCREEN: '1', NUSADESK_DOWNLOAD_DIR: dl.host, NUSADESK_TEST_SEND_BYTES: String(SIZE_H2V), NUSADESK_TEST_HOST_SNAPSHOT_MS: '15000' }, 'host');
   setTimeout(async () => {
@@ -103,10 +109,19 @@ setTimeout(() => {
     // 2) wrong password: nothing may be shared
     const w = await runViewer('e2eViewer2', '111111111:wrongpass1');
     check(!!w && w.authorized === false && w.videoWidth === 0 && w.ended === true && /Kata sandi salah/.test(w.overlay || ''),
-      'kata sandi salah ditolak tanpa membagikan layar', JSON.stringify(w && { authorized: w.authorized, video: w.videoWidth, overlay: w.overlay }));
+      'kata sandi salah ditolak tanpa membagikan layar', JSON.stringify(w ? { authorized: w.authorized, video: w.videoWidth, overlay: w.overlay } : 'no report'));
+
+    // 3) relay only (when a TURN server is configured for the test)
+    if (TURN) {
+      const t = await runViewer('e2eViewer3', '111111111:testpass', { NUSADESK_FORCE_RELAY: '1', NUSADESK_DOWNLOAD_DIR: dl.viewer });
+      check(!!t && t.policy === 'relay' && t.relayServers > 0 && t.connected === 'connected' && t.videoWidth > 0 && t.authorized === true && /relay$/.test(t.stats || ''),
+        'koneksi lewat relay TURN saja', JSON.stringify(t && { connected: t.connected, video: t.videoWidth, stats: t.stats, policy: t.policy, relayServers: t.relayServers, overlay: t.overlay }));
+    } else {
+      console.log('SKIP koneksi lewat relay TURN (set NUSADESK_E2E_TURN_URLS dan NUSADESK_E2E_TURN_SECRET)');
+    }
 
     fs.rmSync(dbFile, { force: true });
     done(failures ? 1 : 0);
   }, 2500);
 }, 800);
-setTimeout(() => { console.error('FAIL: timeout'); done(1); }, 80000);
+setTimeout(() => { console.error('FAIL: timeout'); done(1); }, TURN ? 110000 : 80000);

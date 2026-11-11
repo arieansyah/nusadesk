@@ -26,7 +26,10 @@ peer-to-peer dan terenkripsi end-to-end. Server sinyal kecilnya Anda jalankan se
 ## Cara kerja
 
 Server sinyal hanya mempertemukan dua perangkat dan meneruskan data koneksi.
-**Layar, input, file, dan kata sandi tidak pernah melewati server.** Diagram dan
+**Layar, input, file, dan kata sandi tidak pernah melewati server.** Kalau jaringan
+memblokir koneksi langsung (CGNAT, firewall ketat), sesi lewat relay TURN opsional yang
+Anda jalankan sendiri, tetap terenkripsi end-to-end
+([cara pasang](docs/SELF_HOSTING.md#when-connections-fail-turn)). Diagram dan
 teknologinya ada di [README bahasa Inggris](README.md#how-it-works).
 
 ## Mulai cepat

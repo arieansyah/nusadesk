@@ -32,6 +32,23 @@ const LIMITS = {
 const FAIL_WINDOW_MS = 15 * 60 * 1000;
 const FAIL_LIMITS = { ipHost: 5, ip: 20, host: 50 };
 
+// ---------- TURN relay (optional) ----------
+// When a direct peer-to-peer path is impossible (CGNAT, strict firewalls), WebRTC falls
+// back to a TURN relay. Credentials follow the TURN REST API scheme shared with coturn
+// (use-auth-secret): username "<expiry>:<deviceId>", password HMAC-SHA1(secret, username).
+// They are issued per session to both sides and expire on their own, so no long-lived
+// TURN password ships in the app. The relay only sees DTLS-encrypted traffic.
+const TURN_SECRET = process.env.TURN_SECRET || '';
+const TURN_URLS = (process.env.TURN_URLS || '').split(',').map((u) => u.trim()).filter((u) => /^turns?:/.test(u));
+const TURN_TTL = Math.max(Number(process.env.TURN_TTL || 86400), 600);
+
+function turnFor(deviceId) {
+  if (!TURN_SECRET || !TURN_URLS.length) return null;
+  const username = `${Math.floor(Date.now() / 1000) + TURN_TTL}:${deviceId}`;
+  const credential = crypto.createHmac('sha1', TURN_SECRET).update(username).digest('base64');
+  return [{ urls: TURN_URLS, username, credential }];
+}
+
 // ---------- device ownership: id -> { k: sha256(deviceKey), t: lastSeen } ----------
 let owners = {};
 try {
@@ -187,7 +204,7 @@ function handle(ws, msg) {
       sessions.set(sessionId, { host: target, viewer: me, viewerIp: ws.ip, accepted: false, created: Date.now() });
       log('connect-request', mode);
       send(ws, { type: 'connect-pending', sessionId, target });
-      send(hostWs, { type: 'incoming', sessionId, from: me, name: str(msg.name, 64), mode });
+      send(hostWs, { type: 'incoming', sessionId, from: me, name: str(msg.name, 64), mode, ice: turnFor(target) });
       return;
     }
     case 'connect-response': {
@@ -209,6 +226,7 @@ function handle(ws, msg) {
       send(online.get(s.viewer), {
         type: 'connect-result', sessionId: msg.sessionId, accepted: !!msg.accepted,
         reason: msg.accepted ? null : str(msg.reason, 32) || 'rejected', auth,
+        ice: msg.accepted ? turnFor(s.viewer) : null,
       });
       return;
     }
@@ -255,4 +273,5 @@ setInterval(() => {
   for (const [k, c] of counters) if (now >= c.reset) counters.delete(k);
 }, 30000);
 
-server.listen(PORT, () => log(`NusaDesk signaling server on :${PORT}${TRUST_PROXY ? ' (trusting proxy headers)' : ''}`));
+server.listen(PORT, () => log(`NusaDesk signaling server on :${PORT}${TRUST_PROXY ? ' (trusting proxy headers)' : ''}`
+  + (TURN_SECRET && TURN_URLS.length ? `, TURN relay ${TURN_URLS.join(' ')}` : ', no TURN relay configured')));
